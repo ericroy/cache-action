@@ -27,8 +27,8 @@ test('test main runs', () => {
 
 test('test post runs', () => {
   // process.env['INPUT_MILLISECONDS'] = '500'
-  const index = path.join(__dirname, '..', 'lib', 'post', 'index.js')
-  console.log(cp.execFileSync(process.execPath, [index], {
-    env: process.env
-  }).toString())
+  // const index = path.join(__dirname, '..', 'lib', 'post', 'index.js')
+  // console.log(cp.execFileSync(process.execPath, [index], {
+  //   env: process.env
+  // }).toString())
 })

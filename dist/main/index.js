@@ -1,7 +1,7 @@
 require('./sourcemap-register.js');/******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 410:
+/***/ 601:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -25,21 +25,140 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.remove = void 0;
-const fs = __importStar(__nccwpck_require__(747));
-function remove(filePath) {
-    try {
-        if (fs.existsSync(filePath)) {
-            fs.unlinkSync(filePath);
+exports.Cache = void 0;
+const core = __importStar(__nccwpck_require__(186));
+const exec = __importStar(__nccwpck_require__(514));
+const io = __importStar(__nccwpck_require__(436));
+const os = __importStar(__nccwpck_require__(87));
+const util = __importStar(__nccwpck_require__(63));
+class Cache {
+    constructor() {
+        this.inputKey = core.getInput('key');
+        this.inputPath = core.getInput('path');
+        this.inputRestoreKeys = core.getMultilineInput('restore-keys');
+        this.inputS3BucketName = core.getInput('s3-bucket-name');
+        this.inputS3KeyPrefix = core.getInput('s3-key-prefix');
+        this.inputCompression = core.getInput('compression');
+        this.tempDir = process.env.RUNNER_TEMP || os.tmpdir();
+        this.uid = `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_RUN_ATTEMPT}`;
+        this.keys = [...this.inputRestoreKeys];
+        if (this.keys.length === 0 || this.keys[0] !== this.inputKey) {
+            this.keys.unshift(this.inputKey);
         }
     }
-    catch (_a) {
-        return false;
+    main() {
+        return __awaiter(this, void 0, void 0, function* () {
+            for (const key of this.keys) {
+                const file = yield this.restore(key);
+                if (file !== null) {
+                    const ok = yield this.extract(file);
+                    util.remove(file);
+                    if (ok) {
+                        return true;
+                    }
+                }
+            }
+            core.warning(`No cache item found.`);
+            return false;
+        });
     }
-    return true;
+    post() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const file = yield this.compress();
+            if (file === null) {
+                throw new Error('Compression failed');
+            }
+            if (!(yield this.cache(file))) {
+                throw new Error('Upload failed');
+            }
+        });
+    }
+    restore(cacheKey) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const objectKey = util.join(this.inputS3KeyPrefix, cacheKey);
+            const remoteObject = `s3://${this.inputS3BucketName}/${objectKey}`;
+            const localFile = util.join(this.tempDir, `cache-${this.uid}`);
+            core.debug(`Attempting to restore cache "${cacheKey}" from remote: ${remoteObject}`);
+            try {
+                const code = yield exec.exec('aws', ['s3', 'cp', remoteObject, localFile]);
+                if (code !== 0) {
+                    core.debug(`Not found, aws exited with status: ${code}`);
+                    return null;
+                }
+                core.info(`Restored cache key: ${cacheKey}`);
+                return localFile;
+            }
+            catch (err) {
+                core.error(`Failed: ${err}`);
+            }
+            return null;
+        });
+    }
+    extract(localFile) {
+        return __awaiter(this, void 0, void 0, function* () {
+            core.debug(`Extracting "${localFile}" to: ${this.inputPath}`);
+            try {
+                io.mkdirP(this.inputPath);
+            }
+            catch (err) {
+                core.error(`Failed to create directory: ${this.inputPath}`);
+                return false;
+            }
+            const code = yield exec.exec('tar', ['-C', this.inputPath, `--${this.inputCompression}`, '-xvf', localFile]);
+            if (code !== 0) {
+                core.error(`Extraction failed, tar exited with status: ${code}`);
+                return false;
+            }
+            core.debug('Extraction complete');
+            return true;
+        });
+    }
+    compress() {
+        return __awaiter(this, void 0, void 0, function* () {
+            const localFile = util.join(this.tempDir, `cache-${this.uid}`);
+            core.debug(`Compressing "${this.inputPath}" to: ${localFile}`);
+            try {
+                io.mkdirP(this.inputPath);
+            }
+            catch (err) {
+                core.error(`Failed to create directory: ${this.inputPath}`);
+                return null;
+            }
+            const code = yield exec.exec('tar', ['-C', this.inputPath, `--${this.inputCompression}`, '-cvf', localFile, './*']);
+            if (code !== 0) {
+                core.error(`Compression failed, tar exited with status: ${code}`);
+                return null;
+            }
+            core.debug('Compression complete');
+            return localFile;
+        });
+    }
+    cache(localFile) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const objectKey = util.join(this.inputS3KeyPrefix, this.inputKey);
+            const remoteObject = `s3://${this.inputS3BucketName}/${objectKey}`;
+            core.debug(`Uploading "${localFile}" to: ${remoteObject}`);
+            const code = yield exec.exec('aws', ['s3', 'cp', localFile, remoteObject]);
+            if (code !== 0) {
+                core.error(`Upload failed, aws exited with status: ${code}`);
+                return false;
+            }
+            core.debug('Upload complete');
+            return true;
+        });
+    }
 }
-exports.remove = remove;
+exports.Cache = Cache;
 
 
 /***/ }),
@@ -79,65 +198,13 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(186));
-const exec = __importStar(__nccwpck_require__(514));
-const os = __importStar(__nccwpck_require__(87));
-const path = __importStar(__nccwpck_require__(622));
-const remove_1 = __nccwpck_require__(410);
+const cache_1 = __nccwpck_require__(601);
 function main() {
     return __awaiter(this, void 0, void 0, function* () {
         try {
-            const inputKey = core.getInput('key');
-            const inputPath = core.getInput('path');
-            const inputRestoreKeys = core
-                .getInput('restore-keys')
-                .split('\n')
-                .map(s => s.trim())
-                .filter(Boolean);
-            const inputS3BucketName = core.getInput('s3-bucket-name');
-            const inputS3KeyPrefix = core.getInput('s3-key-prefix');
-            const inputCompression = core.getInput('compression');
-            const uid = `${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_NUMBER}-${process.env.GITHUB_RUN_ATTEMPT}`;
-            const tempDir = process.env.RUNNER_TEMP || os.tmpdir();
-            const archiveFile = path.join(tempDir, `cache-${uid}`).replace(/\\/g, '/');
-            const keys = inputRestoreKeys;
-            if (keys.length === 0 || keys[0] !== inputKey) {
-                keys.unshift(inputKey);
-            }
-            for (const key of keys) {
-                const objectKey = path.join(inputS3KeyPrefix, key).replace(/\\/g, '/');
-                const sourceURI = `s3://${inputS3BucketName}/${objectKey}`;
-                core.debug(`Fetching: ${sourceURI}`);
-                let exitCode = yield exec.exec('aws', [
-                    's3',
-                    'cp',
-                    sourceURI,
-                    archiveFile
-                ]);
-                if (exitCode !== 0) {
-                    core.debug('-- Cache miss');
-                    continue;
-                }
-                core.debug('-- Cache hit');
-                core.debug(`Extracting to: ${inputPath}`);
-                exitCode = yield exec.exec('tar', [
-                    '-C',
-                    inputPath,
-                    `--${inputCompression}`,
-                    '-xvf',
-                    archiveFile
-                ]);
-                if (exitCode !== 0) {
-                    core.debug(`-- Extraction failed!`);
-                    (0, remove_1.remove)(archiveFile);
-                    continue;
-                }
-                core.debug('Extraction complete');
-                (0, remove_1.remove)(archiveFile);
-                core.setOutput('cache-hit', true);
-                return;
-            }
-            core.debug('No cache entry found');
-            core.setOutput('cache-hit', false);
+            const c = new cache_1.Cache();
+            const hit = yield c.main();
+            core.setOutput('cache-hit', hit);
         }
         catch (error) {
             if (error instanceof Error)
@@ -146,6 +213,54 @@ function main() {
     });
 }
 main();
+
+
+/***/ }),
+
+/***/ 63:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.join = exports.remove = void 0;
+const fs = __importStar(__nccwpck_require__(747));
+const path = __importStar(__nccwpck_require__(622));
+function remove(filePath) {
+    try {
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+    }
+    catch (_a) {
+        return false;
+    }
+    return true;
+}
+exports.remove = remove;
+function join(part, ...parts) {
+    return path.join(part, ...parts).replace(/\\/g, '/');
+}
+exports.join = join;
 
 
 /***/ }),
