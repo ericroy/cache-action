@@ -1,11 +1,33 @@
-name: 'Your name here'
-description: 'Provide a description here'
-author: 'Your name or organization here'
+name: 'cache-action'
+description: 'A Github Action that caches files to/from an S3 bucket.'
+author: 'eric@hololabs.org'
 inputs:
-  milliseconds: # change this
+  key:
     required: true
-    description: 'input description here'
-    default: 'default value if applicable'
+    description: 'The key used when writing data to the cache'  
+  path:
+    required: true
+    description: 'Repo-relative path to the directory to be cached'
+  restore-keys:
+    required: false
+    description: 'If provided, this is a prioritized list (one key per line) of cache keys to try when fetching the cache data'
+    default: ''
+  s3-bucket-name:
+    required: true
+    description: 'Name of the s3 bucket in which cached files are stored'
+  s3-key-prefix:
+    required: false
+    description: 'The location within the bucket to store the cached files'
+    default: ''
+  compression:
+    required: false
+    description: 'The compression backend to use with the tar command.  Eg: a value of "zstd" would use the flag --zstd, "xf" would use the flag --xf, etc.'
+    default: gzip
+outputs:
+  cache-hit:
+    description: 'A boolean value to indicate whether data was found in the cache'
 runs:
   using: 'node16'
   main: 'dist/index.js'
+  post: 'dist/post.js'
+  post-if: 'success()'
